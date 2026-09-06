@@ -1,1 +1,88 @@
+# =========================
+
+# Java / Build
+
+# =========================
+
+target/
+out/
+*.class
+
+# =========================
+
+# Logs
+
+# =========================
+
+*.log
+
+# =========================
+
+# IntelliJ IDEA
+
+# =========================
+
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# =========================
+
+# Eclipse
+
+# =========================
+
+.classpath
+.project
+.settings/
+.factorypath
+
+# =========================
+
+# VS Code
+
+# =========================
+
+.vscode/
+
+# =========================
+
+# Environment / Secrets
+
+# =========================
+
+.env
+*.env
+
+# =========================
+
+# Spring Boot Local Config
+
+# =========================
+
+application-local.properties
+application-local.yml
+application-local.yaml
+
+# =========================
+
+# OS Files
+
+# =========================
+
+.DS_Store
+Thumbs.db
+
+# =========================
+
+# Temporary Files
+
+# =========================
+
+*.tmp
+*.temp
+*.swp
+*.swo
  
+/.metadata/
