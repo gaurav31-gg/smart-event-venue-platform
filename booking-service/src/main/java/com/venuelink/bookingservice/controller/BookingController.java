@@ -1,0 +1,34 @@
+package com.venuelink.bookingservice.controller;
+
+import com.venuelink.bookingservice.dto.BookingRequest;
+import com.venuelink.bookingservice.dto.BookingResponse;
+import com.venuelink.bookingservice.service.BookingService;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/bookings")
+@RequiredArgsConstructor
+public class BookingController {
+
+    private final BookingService bookingService;
+
+    @PostMapping
+    public ResponseEntity<BookingResponse> createBooking(
+            @Valid @RequestBody BookingRequest request) {
+
+        BookingResponse response = bookingService.createBooking(request);
+        return ResponseEntity.status(HttpStatus.CREATED).body(response);
+    }
+
+    @GetMapping("/{bookingId}")
+    public ResponseEntity<BookingResponse> getBookingById(
+            @PathVariable Long bookingId) {
+
+        BookingResponse response = bookingService.getBookingById(bookingId);
+        return ResponseEntity.ok(response);
+    }
+}
