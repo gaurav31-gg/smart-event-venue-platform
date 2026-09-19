@@ -8,64 +8,72 @@ import com.venuelink.bookingservice.exception.*;
 import com.venuelink.bookingservice.repository.BookingRepository;
 import feign.FeignException;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-//import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.concurrent.ExecutionException;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class BookingServiceImpl implements BookingService {
 
     private final BookingRepository bookingRepository;
     private final SeatLockService seatLockService;
     private final EventClient eventClient;
     private final CustomerClient customerClient;
+    private final PaymentIntegrationService paymentIntegrationService;
 
     @Override
     public BookingResponse createBooking(BookingRequest request) {
 
-        // Step 1: Validate customer exists
         validateCustomer(request.getCustomerId());
-
-        // Step 2: Fetch event details (also validates event exists, and gives us
-        // the ticket price + status needed below)
         EventResponse event = fetchEvent(request.getEventId());
 
-        // Step 3: Block bookings on closed events (Scenario 11)
         if ("COMPLETED".equals(event.getStatus()) || "CANCELLED".equals(event.getStatus())) {
             throw new EventClosedException(
                     "Cannot book seats for an event that is " + event.getStatus());
         }
 
-        // Step 4: Atomically reserve seats in Redis (Scenario 5 - the critical section)
         seatLockService.reserveSeats(request.getEventId(), request.getNumberOfSeats());
 
-        // Step 5: From here on, if ANYTHING fails, we must release the seats we just
-        // reserved in Redis — this is the compensating action of our saga.
         try {
             BigDecimal totalAmount = event.getTicketPrice()
                     .multiply(BigDecimal.valueOf(request.getNumberOfSeats()));
 
+            // Save booking as PENDING first — payment hasn't happened yet
             Booking booking = Booking.builder()
                     .customerId(request.getCustomerId())
                     .eventId(request.getEventId())
                     .numberOfSeats(request.getNumberOfSeats())
                     .bookingDate(LocalDateTime.now())
                     .totalAmount(totalAmount)
-                    // TEMPORARY: marking CONFIRMED directly since Payment Service
-                    // doesn't exist yet. Once built, this becomes PENDING until
-                    // payment succeeds.
-                    .bookingStatus(Booking.BookingStatus.CONFIRMED)
+                    .bookingStatus(Booking.BookingStatus.PENDING)
                     .build();
 
             Booking savedBooking = bookingRepository.save(booking);
 
+            // Now attempt payment
+            String paymentStatus = attemptPayment(savedBooking, totalAmount);
+
+            if ("SUCCESS".equals(paymentStatus)) {
+                savedBooking.setBookingStatus(Booking.BookingStatus.CONFIRMED);
+                bookingRepository.save(savedBooking);
+            } else {
+                // Covers both "FAILED" (business decline) and "SERVICE_UNAVAILABLE"
+                // (circuit breaker / timeout / Payment Service down) — both need
+                // the same compensating action.
+                seatLockService.releaseSeats(request.getEventId(), request.getNumberOfSeats());
+                savedBooking.setBookingStatus(Booking.BookingStatus.FAILED);
+                bookingRepository.save(savedBooking);
+            }
+
             return BookingResponse.fromEntity(savedBooking);
 
         } catch (Exception ex) {
-            // Compensating action: give back the seats since the booking didn't complete
+            // Any unexpected failure after seat reservation — release seats
             seatLockService.releaseSeats(request.getEventId(), request.getNumberOfSeats());
             throw ex;
         }
@@ -77,6 +85,33 @@ public class BookingServiceImpl implements BookingService {
                 .orElseThrow(() -> new BookingNotFoundException(
                         "Booking not found with id: " + bookingId));
         return BookingResponse.fromEntity(booking);
+    }
+
+    /**
+     * Calls Payment Service (via the Resilience4j-wrapped PaymentIntegrationService)
+     * and returns a simple status string: "SUCCESS", "FAILED", or "SERVICE_UNAVAILABLE".
+     */
+    private String attemptPayment(Booking booking, BigDecimal amount) {
+        PaymentRequest paymentRequest = new PaymentRequest(
+                booking.getBookingId(),
+                amount,
+                "UPI", // TODO: take this from the booking request if you want to support multiple modes
+                "BOOKING-" + booking.getBookingId()
+        );
+
+        try {
+            PaymentResponse response = paymentIntegrationService
+                    .callPaymentService(paymentRequest)
+                    .get(); // .get() blocks until the CompletableFuture completes
+
+            return response.getPaymentStatus();
+
+        } catch (ExecutionException | InterruptedException e) {
+            // This catches genuine unexpected errors from the async call itself
+            log.error("Unexpected error calling Payment Service for booking {}: {}",
+                    booking.getBookingId(), e.getMessage());
+            return "SERVICE_UNAVAILABLE";
+        }
     }
 
     private void validateCustomer(Long customerId) {
