@@ -4,6 +4,7 @@ import com.venuelink.bookingservice.client.*;
 import com.venuelink.bookingservice.dto.BookingRequest;
 import com.venuelink.bookingservice.dto.BookingResponse;
 import com.venuelink.bookingservice.entity.Booking;
+import com.venuelink.bookingservice.event.BookingCreatedEvent;
 import com.venuelink.bookingservice.exception.*;
 import com.venuelink.bookingservice.repository.BookingRepository;
 import feign.FeignException;
@@ -25,6 +26,8 @@ public class BookingServiceImpl implements BookingService {
     private final EventClient eventClient;
     private final CustomerClient customerClient;
     private final PaymentIntegrationService paymentIntegrationService;
+    
+    private final BookingEventPublisher bookingEventPublisher;
 
     @Override
     public BookingResponse createBooking(BookingRequest request) {
@@ -61,6 +64,17 @@ public class BookingServiceImpl implements BookingService {
             if ("SUCCESS".equals(paymentStatus)) {
                 savedBooking.setBookingStatus(Booking.BookingStatus.CONFIRMED);
                 bookingRepository.save(savedBooking);
+                
+                //publish notification via kafka
+                bookingEventPublisher.publishBookingCreated(new BookingCreatedEvent(
+                        savedBooking.getBookingId(),
+                        savedBooking.getCustomerId(),
+                        savedBooking.getEventId(),
+                        savedBooking.getNumberOfSeats(),
+                        savedBooking.getTotalAmount(),
+                        savedBooking.getBookingStatus().name(),
+                        savedBooking.getBookingDate()
+                ));
             } else {
                 // Covers both "FAILED" (business decline) and "SERVICE_UNAVAILABLE"
                 // (circuit breaker / timeout / Payment Service down) — both need
@@ -68,6 +82,17 @@ public class BookingServiceImpl implements BookingService {
                 seatLockService.releaseSeats(request.getEventId(), request.getNumberOfSeats());
                 savedBooking.setBookingStatus(Booking.BookingStatus.FAILED);
                 bookingRepository.save(savedBooking);
+                
+              //publish notification via kafka
+                bookingEventPublisher.publishBookingCreated(new BookingCreatedEvent(
+                        savedBooking.getBookingId(),
+                        savedBooking.getCustomerId(),
+                        savedBooking.getEventId(),
+                        savedBooking.getNumberOfSeats(),
+                        savedBooking.getTotalAmount(),
+                        savedBooking.getBookingStatus().name(),
+                        savedBooking.getBookingDate()
+                ));
             }
 
             return BookingResponse.fromEntity(savedBooking);
@@ -96,7 +121,8 @@ public class BookingServiceImpl implements BookingService {
                 booking.getBookingId(),
                 amount,
                 "UPI", // TODO: take this from the booking request if you want to support multiple modes
-                "BOOKING-" + booking.getBookingId()
+                "BOOKING-" + booking.getBookingId(),
+                booking.getCustomerId()
         );
 
         try {
@@ -129,4 +155,7 @@ public class BookingServiceImpl implements BookingService {
             throw new EventNotFoundException("Event not found with id: " + eventId);
         }
     }
+    
+    
+    
 }

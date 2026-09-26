@@ -1,4 +1,4 @@
-package com.venuelink.bookingservice.client;
+package com.venuelink.notificationservice.event;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -9,10 +9,9 @@ import java.math.BigDecimal;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public class PaymentRequest {
+public class PaymentFailedEvent {
     private Long bookingId;
-    private BigDecimal amount;
-    private String paymentMode;
-    private String idempotencyKey;
     private Long customerId;
+    private BigDecimal amount;
+    private String reason;
 }

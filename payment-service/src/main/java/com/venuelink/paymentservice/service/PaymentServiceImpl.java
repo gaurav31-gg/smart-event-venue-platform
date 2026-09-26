@@ -1,24 +1,29 @@
 package com.venuelink.paymentservice.service;
 
-import com.venuelink.paymentservice.dto.PaymentRequest;
-import com.venuelink.paymentservice.dto.PaymentResponse;
-import com.venuelink.paymentservice.entity.Payment;
-import com.venuelink.paymentservice.exception.PaymentNotFoundException;
-import com.venuelink.paymentservice.exception.PaymentProcessingException;
-import com.venuelink.paymentservice.repository.PaymentRepository;
-import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
 import java.time.LocalDateTime;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import com.venuelink.paymentservice.dto.PaymentRequest;
+import com.venuelink.paymentservice.dto.PaymentResponse;
+import com.venuelink.paymentservice.entity.Payment;
+import com.venuelink.paymentservice.event.PaymentCompletedEvent;
+import com.venuelink.paymentservice.event.PaymentFailedEvent;
+import com.venuelink.paymentservice.exception.PaymentNotFoundException;
+import com.venuelink.paymentservice.exception.PaymentProcessingException;
+import com.venuelink.paymentservice.repository.PaymentRepository;
+
+import lombok.RequiredArgsConstructor;
 
 @Service
 @RequiredArgsConstructor
 public class PaymentServiceImpl implements PaymentService {
 
     private final PaymentRepository paymentRepository;
+    private final PaymentEventPublisher paymentEventPublisher;
 
     @Override
     @Transactional
@@ -41,6 +46,7 @@ public class PaymentServiceImpl implements PaymentService {
 
         Payment payment = Payment.builder()
                 .bookingId(request.getBookingId())
+                .customerId(request.getCustomerId())
                 .amount(request.getAmount())
                 .paymentMode(request.getPaymentMode())
                 .transactionReference(generateTransactionReference())
@@ -49,7 +55,39 @@ public class PaymentServiceImpl implements PaymentService {
                 .idempotencyKey(request.getIdempotencyKey())
                 .build();
 
+//        Payment savedPayment = paymentRepository.save(payment);     
+
+//        if (!success) {
+//            // We still SAVE the failed payment record (for audit/history), but we
+//            // throw so the caller (Booking Service) knows this attempt failed and
+//            // can run its compensating action (release seats, mark booking FAILED).
+//            throw new PaymentProcessingException(
+//                    "Payment failed for booking id: " + request.getBookingId());
+//        }
+//
+//        return PaymentResponse.fromEntity(savedPayment);
+        
+        
+        /* after kafka adding the changes in code to publish event*/
+        
         Payment savedPayment = paymentRepository.save(payment);
+
+        if (success) {
+            paymentEventPublisher.publishPaymentCompleted(new PaymentCompletedEvent(
+                    savedPayment.getPaymentId(),
+                    savedPayment.getCustomerId(),
+                    savedPayment.getBookingId(),
+                    savedPayment.getAmount(),
+                    savedPayment.getTransactionReference()
+            ));
+        } else {
+            paymentEventPublisher.publishPaymentFailed(new PaymentFailedEvent(
+                    savedPayment.getBookingId(),
+                    savedPayment.getCustomerId(),
+                    savedPayment.getAmount(),
+                    "Payment declined by gateway"
+            ));
+        }
 
         if (!success) {
             // We still SAVE the failed payment record (for audit/history), but we

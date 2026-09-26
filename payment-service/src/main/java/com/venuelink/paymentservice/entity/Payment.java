@@ -23,6 +23,9 @@ public class Payment {
 
     @Column(nullable = false)
     private Long bookingId;
+    
+    @Column(nullable = false)
+    private Long customerId;
 
     @Column(nullable = false)
     private BigDecimal amount;
