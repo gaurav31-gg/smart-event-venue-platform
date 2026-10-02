@@ -41,6 +41,12 @@ public class GlobalExceptionHandler {
                 .collect(Collectors.joining(", "));
         return buildResponse(HttpStatus.BAD_REQUEST, "Bad Request", message, request);
     }
+    
+    @ExceptionHandler(ForbiddenException.class)
+    public ResponseEntity<ErrorResponse> handleForbidden(
+            ForbiddenException ex, HttpServletRequest request) {
+        return buildResponse(HttpStatus.FORBIDDEN, "Forbidden", ex.getMessage(), request);
+    }
 
     private ResponseEntity<ErrorResponse> buildResponse(
             HttpStatus status, String error, String message, HttpServletRequest request) {
