@@ -1,20 +1,29 @@
 package com.venuelink.customerservice.service;
 
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
 import com.venuelink.customerservice.dto.CustomerRegistrationRequest;
 import com.venuelink.customerservice.dto.CustomerResponse;
+import com.venuelink.customerservice.dto.LoginRequest;
+import com.venuelink.customerservice.dto.LoginResponse;
 import com.venuelink.customerservice.entity.Customer;
 import com.venuelink.customerservice.exception.CustomerAlreadyExistsException;
 import com.venuelink.customerservice.exception.CustomerNotFoundException;
+import com.venuelink.customerservice.exception.InvalidCredentialsException;
 import com.venuelink.customerservice.repository.CustomerRepository;
+import com.venuelink.customerservice.security.JwtUtil;
+
 import lombok.RequiredArgsConstructor;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @RequiredArgsConstructor
 public class CustomerServiceImpl implements CustomerService {
 
     private final CustomerRepository customerRepository;
+    private final PasswordEncoder passwordEncoder;
+    private final JwtUtil jwtUtil;
 
     @Override
     @Transactional
@@ -35,8 +44,9 @@ public class CustomerServiceImpl implements CustomerService {
                 .email(request.getEmail())
                 .mobileNumber(request.getMobileNumber())
                 .city(request.getCity())
+                .password(passwordEncoder.encode(request.getPassword()))
                 .build();
-        
+
         // membershipType and status use their @Builder.Default values (REGULAR, ACTIVE)
 
         Customer savedCustomer = customerRepository.save(customer);
@@ -50,5 +60,30 @@ public class CustomerServiceImpl implements CustomerService {
                 .orElseThrow(() -> new CustomerNotFoundException(
                         "Customer not found with id: " + customerId));
         return CustomerResponse.fromEntity(customer);
+    }
+    
+    
+    
+    @Override
+    public LoginResponse login(LoginRequest request) {
+        Customer customer = customerRepository.findByEmail(request.getEmail())
+                .orElseThrow(() -> new InvalidCredentialsException("Invalid email or password"));
+
+        if (!passwordEncoder.matches(request.getPassword(), customer.getPassword())) {
+            throw new InvalidCredentialsException("Invalid email or password");
+        }
+
+        String token = jwtUtil.generateToken(
+                customer.getCustomerId(),
+                customer.getEmail(),
+                customer.getRole().name()
+        );
+
+        return new LoginResponse(
+                token,
+                customer.getCustomerId(),
+                customer.getFullName(),
+                customer.getRole().name()
+        );
     }
 }
